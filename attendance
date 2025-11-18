@@ -1,0 +1,470 @@
+create folder config/db.php
+<?php
+// config/db.php
+$host = '127.0.0.1';
+$db   = 'attendance_db';
+$user = 'root';
+$pass = '';
+$charset = 'utf8mb4';
+
+$dsn = "mysql:host=$host;dbname=$db;charset=$charset";
+$options = [
+    PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+];
+
+try {
+    $pdo = new PDO($dsn, $user, $pass, $options);
+} catch (PDOException $e) {
+    die('DB Connection failed: ' . $e->getMessage());
+}
+
+attendance_db.sql
+-- Create database
+CREATE DATABASE attendance_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE attendance_db;
+
+-- Departments
+CREATE TABLE departments (
+  depCode INT PRIMARY KEY AUTO_INCREMENT,
+  depName VARCHAR(100) NOT NULL,
+  depHead VARCHAR(100),
+  depTelNo VARCHAR(50)
+);
+
+-- Employees
+CREATE TABLE employees (
+  empID INT PRIMARY KEY AUTO_INCREMENT,
+  depCode INT NOT NULL,
+  empFName VARCHAR(100) NOT NULL,
+  empLName VARCHAR(100) NOT NULL,
+  empRatePH DECIMAL(10,2) DEFAULT 0,
+  FOREIGN KEY (depCode) REFERENCES departments(depCode) ON DELETE CASCADE
+);
+
+-- Attendance
+CREATE TABLE attendance (
+  attRN INT PRIMARY KEY AUTO_INCREMENT,
+  empID INT NOT NULL,
+  attDate DATE NOT NULL,
+  attTimeIn DATETIME NULL,
+  attTimeOut DATETIME NULL,
+  attStat VARCHAR(20) DEFAULT 'normal',
+  FOREIGN KEY (empID) REFERENCES employees(empID) ON DELETE CASCADE
+);
+
+-- Sample data
+INSERT INTO departments (depName, depHead, depTelNo) VALUES
+('Accounting','Julius','2557777'),
+('Warehouse','Caesar','2551111'),
+('HR','Gretchen','2552222'),
+('IT','Gilbert','2553333'),
+('Production','Troy','2554444'),
+('QA','Evangeline','2550000'),
+('Marketing','Jessica','2558888');
+
+INSERT INTO employees (depCode, empFName, empLName, empRatePH) VALUES
+(1,'Neil','Basabe',500.00),
+(1,'Heubert','Ferolino',300.00),
+(2,'Denis','Durano',200.00),
+(3,'Jennifer','Amores',500.00),
+(4,'Catherine','Carumba',350.00),
+(5,'Leah','Ybanez',345.00),
+(6,'Leo','Bermudez',290.00);
+
+-- Sample attendance (same date/time for demo)
+INSERT INTO attendance (empID, attDate, attTimeIn, attTimeOut, attStat) VALUES
+(1,'2024-04-15','2024-04-15 08:20:00','2024-04-15 17:20:00','normal'),
+(1,'2024-04-16','2024-04-16 08:20:00','2024-04-16 17:20:00','normal');
+
+Attendance.php
+<?php
+require 'config/db.php';
+$action = $_GET['action'] ?? '';
+
+if($_SERVER['REQUEST_METHOD'] === 'POST'){
+    if(isset($_POST['time_in'])){
+        $empID = intval($_POST['empID']);
+        $now = date('Y-m-d H:i:s');
+        $stmt = $pdo->prepare("INSERT INTO attendance(empID, attDate, attTimeIn, attStat) VALUES(?,?,?, 'normal')");
+        $stmt->execute([$empID, date('Y-m-d'), $now]);
+        header('Location: attendance.php'); exit;
+    }
+    if(isset($_POST['time_out'])){
+        $attRN = intval($_POST['attRN']);
+        $now = date('Y-m-d H:i:s');
+        $stmt = $pdo->prepare("UPDATE attendance SET attTimeOut=? WHERE attRN=?");
+        $stmt->execute([$now, $attRN]);
+        header('Location: attendance.php'); exit;
+    }
+    if(isset($_POST['cancel'])){
+        $attRN = intval($_POST['attRN']);
+        $stmt = $pdo->prepare("UPDATE attendance SET attStat='cancelled' WHERE attRN=?");
+        $stmt->execute([$attRN]);
+        header('Location: attendance.php'); exit;
+    }
+}
+
+$records = $pdo->query("SELECT a.*, e.empFName, e.empLName FROM attendance a JOIN employees e USING(empID) ORDER BY a.attRN DESC LIMIT 50")->fetchAll();
+$emps = $pdo->query("SELECT * FROM employees ORDER BY empLName")->fetchAll();
+?>
+<!doctype html><html><head><meta charset="utf-8"><title>Attendance Recording</title>
+<link rel="stylesheet" href="css/style.css"></head><body>
+<div class="container">
+  <h2>Attendance Recording</h2>
+  <a href="index.php">Back to Menu</a>
+
+  <h3>Record Attendance Here</h3>
+  <form method="post" class="form-inline">
+    <select name="empID" required>
+      <option value="">Select Employee</option>
+      <?php foreach($emps as $e): ?>
+        <option value="<?=$e['empID']?>"><?=htmlspecialchars($e['empLName'].', '.$e['empFName'].' ('.$e['empID'].')')?></option>
+      <?php endforeach;?>
+    </select>
+    <button name="time_in">Time In (Create)</button>
+  </form>
+
+  <table class="table">
+    <thead><tr><th>Record #</th><th>Emp ID</th><th>Name</th><th>Date/Time In</th><th>Date/Time Out</th><th>Action</th></tr></thead>
+    <tbody>
+    <?php foreach($records as $r): ?>
+      <tr>
+        <td><?=$r['attRN']?></td>
+        <td><?=$r['empID']?></td>
+        <td><?=htmlspecialchars($r['empLName'].', '.$r['empFName'])?></td>
+        <td><?=htmlspecialchars($r['attTimeIn'])?></td>
+        <td><?=htmlspecialchars($r['attTimeOut'])?></td>
+        <td>
+          <?php if(!$r['attTimeOut'] && $r['attStat']=='normal'): ?>
+            <form method="post" style="display:inline">
+              <input type="hidden" name="attRN" value="<?=$r['attRN']?>">
+              <button name="time_out">Time Out</button>
+            </form>
+          <?php endif; ?>
+          <form method="post" style="display:inline">
+            <input type="hidden" name="attRN" value="<?=$r['attRN']?>">
+            <button name="cancel" onclick="return confirm('Cancel this record?')">Cancel</button>
+          </form>
+        </td>
+      </tr>
+    <?php endforeach;?>
+    </tbody>
+  </table>
+</div></body></html>
+
+departments.php
+<?php
+require 'config/db.php';
+
+$action = $_GET['action'] ?? '';
+if($_SERVER['REQUEST_METHOD'] === 'POST'){
+    if(isset($_POST['add'])){
+        $stmt = $pdo->prepare("INSERT INTO departments(depName, depHead, depTelNo) VALUES(?,?,?)");
+        $stmt->execute([$_POST['depName'], $_POST['depHead'], $_POST['depTelNo']]);
+        header('Location: departments.php'); exit;
+    }
+    if(isset($_POST['edit'])){
+        $stmt = $pdo->prepare("UPDATE departments SET depName=?, depHead=?, depTelNo=? WHERE depCode=?");
+        $stmt->execute([$_POST['depName'], $_POST['depHead'], $_POST['depTelNo'], $_POST['depCode']]);
+        header('Location: departments.php'); exit;
+    }
+}
+if($action === 'delete' && isset($_GET['id'])){
+    $stmt = $pdo->prepare("DELETE FROM departments WHERE depCode=?");
+    $stmt->execute([$_GET['id']]);
+    header('Location: departments.php'); exit;
+}
+
+$deps = $pdo->query("SELECT * FROM departments ORDER BY depCode")->fetchAll();
+?>
+<!doctype html>
+<html><head>
+<meta charset="utf-8"><title>Departments</title>
+<link rel="stylesheet" href="css/style.css">
+</head><body>
+<div class="container">
+  <h2>Departments Management</h2>
+  <a href="index.php">Back to Menu</a>
+
+  <h3>Add Department</h3>
+  <form method="post" style="margin-bottom:10px;">
+    <input name="depName" placeholder="Name" required>
+    <input name="depHead" placeholder="Head">
+    <input name="depTelNo" placeholder="Tel No">
+    <button name="add">Add</button>
+  </form>
+
+  <table class="table">
+    <thead><tr><th>Code</th><th>Name</th><th>Head</th><th>Tel No</th><th>Actions</th></tr></thead>
+    <tbody>
+    <?php foreach($deps as $d): ?>
+      <tr>
+        <td><?=htmlspecialchars($d['depCode'])?></td>
+        <td><?=htmlspecialchars($d['depName'])?></td>
+        <td><?=htmlspecialchars($d['depHead'])?></td>
+        <td><?=htmlspecialchars($d['depTelNo'])?></td>
+        <td class="actions">
+          <a href="?action=edit&id=<?=$d['depCode']?>">Edit</a>
+          <a href="?action=delete&id=<?=$d['depCode']?>" onclick="return confirm('Delete?')">Del</a>
+        </td>
+      </tr>
+    <?php endforeach; ?>
+    </tbody>
+  </table>
+
+<?php
+if($action==='edit' && isset($_GET['id'])){
+    $id = intval($_GET['id']);
+    $row = $pdo->prepare("SELECT * FROM departments WHERE depCode=?"); $row->execute([$id]); $row = $row->fetch();
+    if($row):
+?>
+  <h3>Edit Department</h3>
+  <form method="post">
+    <input type="hidden" name="depCode" value="<?=htmlspecialchars($row['depCode'])?>">
+    <input name="depName" value="<?=htmlspecialchars($row['depName'])?>" required>
+    <input name="depHead" value="<?=htmlspecialchars($row['depHead'])?>">
+    <input name="depTelNo" value="<?=htmlspecialchars($row['depTelNo'])?>">
+    <button name="edit">Save</button>
+  </form>
+<?php endif; } ?>
+
+</div>
+</body></html>
+
+employees.php
+<?php
+require 'config/db.php';
+$action = $_GET['action'] ?? '';
+
+if($_SERVER['REQUEST_METHOD'] === 'POST'){
+    if(isset($_POST['add'])){
+        $stmt = $pdo->prepare("INSERT INTO employees(depCode, empFName, empLName, empRatePH) VALUES(?,?,?,?)");
+        $stmt->execute([$_POST['depCode'], $_POST['empFName'], $_POST['empLName'], $_POST['empRatePH']]);
+        header('Location: employees.php'); exit;
+    }
+    if(isset($_POST['edit'])){
+        $stmt = $pdo->prepare("UPDATE employees SET depCode=?, empFName=?, empLName=?, empRatePH=? WHERE empID=?");
+        $stmt->execute([$_POST['depCode'], $_POST['empFName'], $_POST['empLName'], $_POST['empRatePH'], $_POST['empID']]);
+        header('Location: employees.php'); exit;
+    }
+}
+if($action === 'delete' && isset($_GET['id'])){
+    $stmt = $pdo->prepare("DELETE FROM employees WHERE empID=?");
+    $stmt->execute([$_GET['id']]);
+    header('Location: employees.php'); exit;
+}
+
+$emps = $pdo->query("SELECT e.*, d.depName FROM employees e LEFT JOIN departments d USING(depCode) ORDER BY empID")->fetchAll();
+$deps = $pdo->query("SELECT * FROM departments ORDER BY depName")->fetchAll();
+?>
+<!doctype html><html><head><meta charset="utf-8"><title>Employees</title>
+<link rel="stylesheet" href="css/style.css"></head><body>
+<div class="container">
+  <h2>Employees Management</h2>
+  <a href="index.php">Back to Menu</a>
+
+  <h3>Add an Employee</h3>
+  <form method="post" class="form-inline">
+    <select name="depCode" required>
+      <option value="">Select Dept</option>
+      <?php foreach($deps as $d): ?>
+        <option value="<?=$d['depCode']?>"><?=htmlspecialchars($d['depName'])?></option>
+      <?php endforeach; ?>
+    </select>
+    <input name="empLName" placeholder="Lastname" required>
+    <input name="empFName" placeholder="Firstname" required>
+    <input name="empRatePH" placeholder="Rate/Hour" type="number" step="0.01" required>
+    <button name="add">Add</button>
+  </form>
+
+  <table class="table">
+    <thead><tr><th>ID</th><th>Dept</th><th>Lastname</th><th>Firstname</th><th>Rate/Hour</th><th>Actions</th></tr></thead>
+    <tbody>
+      <?php foreach($emps as $e): ?>
+      <tr>
+        <td><?=$e['empID']?></td>
+        <td><?=htmlspecialchars($e['depName'])?></td>
+        <td><?=htmlspecialchars($e['empLName'])?></td>
+        <td><?=htmlspecialchars($e['empFName'])?></td>
+        <td><?=number_format($e['empRatePH'],2)?></td>
+        <td class="actions">
+          <a href="?action=edit&id=<?=$e['empID']?>">Edit</a>
+          <a href="?action=delete&id=<?=$e['empID']?>" onclick="return confirm('Delete?')">Del</a>
+        </td>
+      </tr>
+      <?php endforeach; ?>
+    </tbody>
+  </table>
+
+<?php
+if($action==='edit' && isset($_GET['id'])){
+    $id = intval($_GET['id']);
+    $row = $pdo->prepare("SELECT * FROM employees WHERE empID=?"); $row->execute([$id]); $row = $row->fetch();
+    if($row):
+?>
+  <h3>Edit Employee</h3>
+  <form method="post">
+    <input type="hidden" name="empID" value="<?=$row['empID']?>">
+    <select name="depCode" required>
+      <?php foreach($deps as $d): ?>
+        <option value="<?=$d['depCode']?>" <?= $d['depCode']==$row['depCode'] ? 'selected':'' ?>><?=htmlspecialchars($d['depName'])?></option>
+      <?php endforeach; ?>
+    </select>
+    <input name="empLName" value="<?=htmlspecialchars($row['empLName'])?>" required>
+    <input name="empFName" value="<?=htmlspecialchars($row['empFName'])?>" required>
+    <input name="empRatePH" value="<?=htmlspecialchars($row['empRatePH'])?>" type="number" step="0.01" required>
+    <button name="edit">Save</button>
+  </form>
+<?php endif;} ?>
+
+</div></body></html>
+
+index.php
+<?php
+?>
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Employee Attendance Monitoring - Menu</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="container">
+  <h1>Employee Attendance Monitoring System</h1>
+  <div class="menu">
+    <a href="departments.php">Departments Management</a>
+    <a href="employees.php">Employees Management</a>
+    <a href="attendance.php">Attendance Recording</a>
+    <a href="monitor_employee.php">Attendance Monitoring (By Employee)</a>
+    <a href="monitor_range.php">Attendance Monitoring (By Date Range)</a>
+  </div>
+
+  <p class="notice">Choose a module from above to manage records.</p>
+</div>
+</body>
+</html>
+
+monitor_employee.php
+<?php
+require 'config/db.php';
+
+$empID = $_GET['empID'] ?? '';
+$emps = $pdo->query("SELECT empID, empLName, empFName FROM employees ORDER BY empLName")->fetchAll();
+
+$records = [];
+$summary = ['total_hours'=>0, 'salary'=>0, 'rate'=>0];
+
+if($empID){
+    $empID = intval($empID);
+    $stmt = $pdo->prepare("SELECT * FROM attendance WHERE empID=? AND attStat='normal' ORDER BY attDate DESC");
+    $stmt->execute([$empID]);
+    $records = $stmt->fetchAll();
+
+    $r2 = $pdo->prepare("SELECT empRatePH, empFName, empLName FROM employees WHERE empID=?");
+    $r2->execute([$empID]); $info = $r2->fetch();
+    $rate = $info['empRatePH'] ?? 0;
+    $summary['rate'] = $rate;
+    $totalHours = 0;
+    foreach($records as $rec){
+        if($rec['attTimeIn'] && $rec['attTimeOut']){
+            $t = (strtotime($rec['attTimeOut']) - strtotime($rec['attTimeIn']))/3600;
+            $totalHours += $t;
+        }
+    }
+    $summary['total_hours'] = round($totalHours,2);
+    $summary['salary'] = round($summary['total_hours'] * $rate,2);
+}
+?>
+<!doctype html><html><head><meta charset="utf-8"><title>Monitor by Employee</title>
+<link rel="stylesheet" href="css/style.css"></head><body>
+<div class="container">
+  <h2>Attendance Monitoring (By Employee)</h2>
+  <a href="index.php">Back to Menu</a>
+
+  <form method="get" style="margin-top:10px;">
+    <label>Input Employee #: </label>
+    <select name="empID" onchange="this.form.submit()">
+      <option value="">-- Select --</option>
+      <?php foreach($emps as $e): ?>
+        <option value="<?=$e['empID']?>" <?= ($empID==$e['empID'])?'selected':'' ?>><?=$e['empID'].' - '.htmlspecialchars($e['empLName'].', '.$e['empFName'])?></option>
+      <?php endforeach;?>
+    </select>
+  </form>
+
+<?php if($empID && isset($info)): ?>
+  <h3>Name: <?=htmlspecialchars($info['empFName'].' '.$info['empLName'])?></h3>
+
+  <table class="table">
+    <thead><tr><th>Record#</th><th>Date/Time In</th><th>Date/Time Out</th><th>Total (hrs)</th></tr></thead>
+    <tbody>
+    <?php foreach($records as $r): 
+      $total = ($r['attTimeIn'] && $r['attTimeOut']) ? round((strtotime($r['attTimeOut'])-strtotime($r['attTimeIn']))/3600,2) : ''; ?>
+      <tr>
+        <td><?=$r['attRN']?></td>
+        <td><?=htmlspecialchars($r['attTimeIn'])?></td>
+        <td><?=htmlspecialchars($r['attTimeOut'])?></td>
+        <td><?=$total?></td>
+      </tr>
+    <?php endforeach; ?>
+    </tbody>
+  </table>
+
+  <p class="small">Rate Per Hour: <?=number_format($summary['rate'],2)?> | Total Hours Worked: <?=number_format($summary['total_hours'],2)?> | Salary: <?=number_format($summary['salary'],2)?></p>
+<?php endif; ?>
+
+</div></body></html>
+
+monitor_range.php
+<?php
+require 'config/db.php';
+
+$from = $_GET['from'] ?? '';
+$to = $_GET['to'] ?? '';
+
+$records = [];
+if($from && $to){
+    $fromd = date('Y-m-d', strtotime($from));
+    $tod = date('Y-m-d', strtotime($to));
+    $stmt = $pdo->prepare("SELECT a.*, e.empFName, e.empLName FROM attendance a JOIN employees e ON a.empID=e.empID WHERE a.attDate BETWEEN ? AND ? AND a.attStat='normal' ORDER BY a.attDate");
+    $stmt->execute([$fromd, $tod]);
+    $records = $stmt->fetchAll();
+}
+?>
+<!doctype html><html><head><meta charset="utf-8"><title>Monitor by Date Range</title>
+<link rel="stylesheet" href="css/style.css"></head><body>
+<div class="container">
+  <h2>Attendance Monitoring (Date Range)</h2>
+  <a href="index.php">Back to Menu</a>
+
+  <form method="get" style="margin-top:10px;">
+    Date From: <input type="date" name="from" value="<?=$from?>">
+    Date To: <input type="date" name="to" value="<?=$to?>">
+    <button>Show</button>
+  </form>
+
+  <?php if($records): ?>
+    <table class="table">
+      <thead><tr><th>Record#</th><th>Emp ID</th><th>Name</th><th>Date/Time In</th><th>Date/Time Out</th><th>Total (hrs)</th></tr></thead>
+      <tbody>
+      <?php foreach($records as $r): 
+        $total = ($r['attTimeIn'] && $r['attTimeOut']) ? round((strtotime($r['attTimeOut'])-strtotime($r['attTimeIn']))/3600,2) : ''; ?>
+        <tr>
+          <td><?=$r['attRN']?></td>
+          <td><?=$r['empID']?></td>
+          <td><?=htmlspecialchars($r['empLName'].', '.$r['empFName'])?></td>
+          <td><?=htmlspecialchars($r['attTimeIn'])?></td>
+          <td><?=htmlspecialchars($r['attTimeOut'])?></td>
+          <td><?=$total?></td>
+        </tr>
+      <?php endforeach;?>
+      </tbody>
+    </table>
+    <p class="small">Date Generated: <?=date('Y-m-d')?></p>
+  <?php elseif($from || $to): ?>
+    <p>No records found in that date range.</p>
+  <?php endif; ?>
+</div></body></html>
+
+
