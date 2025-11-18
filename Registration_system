@@ -1,0 +1,429 @@
+-- init.sql
+CREATE DATABASE IF NOT EXISTS ucict CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE ucict;
+
+CREATE TABLE IF NOT EXISTS registration (
+  idNum VARCHAR(20) NOT NULL PRIMARY KEY,
+  campus VARCHAR(20) NOT NULL,
+  studFName VARCHAR(100) NOT NULL,
+  studLName VARCHAR(100) NOT NULL,
+  amountPaid DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  attended ENUM('Yes','No') NOT NULL DEFAULT 'No',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- sample data
+INSERT INTO registration (idNum, campus, studFName, studLName, amountPaid, attended) VALUES
+('1234567','Main','Paul','Ypanto',425.00,'No'),
+('2345678','Banilad','Janeth','Borja',400.00,'Yes'),
+('3456789','LM','Shiela','Mendes',450.00,'No');
+<?php
+
+// config.php
+$DB_HOST = '127.0.0.1';
+$DB_NAME = 'ucict';
+$DB_USER = 'root';
+$DB_PASS = ''; // set your password
+
+$options = [
+    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+];
+
+try {
+    $pdo = new PDO("mysql:host=$DB_HOST;dbname=$DB_NAME;charset=utf8mb4", $DB_USER, $DB_PASS, $options);
+} catch (Exception $e) {
+    die('Database connection failed: ' . htmlspecialchars($e->getMessage()));
+}
+<?php
+// header.php
+?>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>UC ICT Congress Registration</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <h1>UC ICT Congress Registration System</h1>
+    <nav>
+      <a href="index.php">Menu</a> |
+      <a href="registration.php">Registration</a> |
+      <a href="attendance.php">Attendance</a> |
+      <a href="raffle.php">Raffle</a> |
+      <a href="report_by_campus.php">Report (By Campus)</a> |
+      <a href="report_summary.php">Report (Summary)</a>
+    </nav>
+    <hr>
+<?php
+// footer.php
+?>
+    <hr>
+    <footer>
+      <small>Generated: <?php echo date('Y-m-d H:i:s'); ?></small>
+    </footer>
+  </div>
+</body>
+</html>
+/* styles.css */
+body { font-family: Arial, Helvetica, sans-serif; background:#f8f9fb; color:#222; margin:0; padding:20px; }
+.container{ max-width:1000px; margin:0 auto; background:#fff; padding:20px; box-shadow:0 0 8px rgba(0,0,0,.05);}
+h1{margin:0 0 10px}
+nav a{color:#0366d6; text-decoration:none; margin-right:8px}
+table{width:100%;border-collapse:collapse;margin-top:10px}
+th,td{border:1px solid #ddd;padding:8px;text-align:left}
+th{background:#f1f3f5}
+.form-row{margin-bottom:8px}
+input[type=text],select{padding:6px;width:100%;box-sizing:border-box}
+.button{padding:8px 12px;background:#0366d6;color:#fff;border:none;cursor:pointer}
+.small{font-size:0.9em;color:#555}
+.notice{padding:8px;background:#e6ffed;border:1px solid #b7ebc6;margin:10px 0}
+.error{padding:8px;background:#ffe6e6;border:1px solid #f5b7b7;margin:10px 0}
+<?php
+// index.php
+require 'header.php';
+?>
+<h2>Menu / Index</h2>
+<div>
+  <p>Choose your Transaction:</p>
+  <ul>
+    <li><a href="registration.php">Registration</a></li>
+    <li><a href="attendance.php">Attendance</a></li>
+    <li><a href="raffle.php">Raffle</a></li>
+    <li><a href="report_by_campus.php">Report (By Campus)</a></li>
+    <li><a href="report_summary.php">Report (Summary)</a></li>
+  </ul>
+</div>
+<?php require 'footer.php'; ?>
+<?php
+// registration.php
+require 'config.php';
+require 'header.php';
+
+$action = $_GET['action'] ?? '';
+$msg = '';
+
+// Create / Update
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $idNum = trim($_POST['idNum']);
+    $studFName = trim($_POST['studFName']);
+    $studLName = trim($_POST['studLName']);
+    $campus = $_POST['campus'];
+    $amountPaid = floatval($_POST['amountPaid']);
+    $attended = $_POST['attended'] ?? 'No';
+
+    if ($idNum === '' || $studFName === '') {
+        $msg = 'ID and First Name required.';
+    } else {
+        // check if exists
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM registration WHERE idNum = ?");
+        $stmt->execute([$idNum]);
+        $exists = $stmt->fetchColumn() > 0;
+
+        if ($exists && ($_POST['mode'] ?? '') === 'create') {
+            $msg = "ID $idNum already registered.";
+        } elseif ($exists && ($_POST['mode'] ?? '') === 'update') {
+            $stmt = $pdo->prepare("UPDATE registration SET studFName=?, studLName=?, campus=?, amountPaid=?, attended=? WHERE idNum=?");
+            $stmt->execute([$studFName, $studLName, $campus, $amountPaid, $attended, $idNum]);
+            $msg = "Record updated.";
+        } elseif (!$exists && ($_POST['mode'] ?? '') === 'create') {
+            $stmt = $pdo->prepare("INSERT INTO registration (idNum, campus, studFName, studLName, amountPaid, attended) VALUES (?,?,?,?,?,?)");
+            $stmt->execute([$idNum, $campus, $studFName, $studLName, $amountPaid, $attended]);
+            $msg = "Registration successful.";
+        }
+    }
+}
+
+// Delete
+if ($action === 'delete' && isset($_GET['id'])) {
+    $id = $_GET['id'];
+    $stmt = $pdo->prepare("DELETE FROM registration WHERE idNum = ?");
+    $stmt->execute([$id]);
+    echo "<div class='notice'>Deleted record $id</div>";
+}
+
+// For edit form
+$edit = null;
+if ($action === 'edit' && isset($_GET['id'])) {
+    $stmt = $pdo->prepare("SELECT * FROM registration WHERE idNum = ?");
+    $stmt->execute([$_GET['id']]);
+    $edit = $stmt->fetch();
+}
+
+// list
+$all = $pdo->query("SELECT * FROM registration ORDER BY created_at DESC")->fetchAll();
+?>
+
+<h2>Registration</h2>
+
+<?php if ($msg): ?><div class="notice"><?php echo htmlspecialchars($msg); ?></div><?php endif; ?>
+
+<form method="post">
+  <input type="hidden" name="mode" value="<?php echo $edit ? 'update' : 'create'; ?>">
+  <div class="form-row">
+    <label>ID Number</label>
+    <input type="text" name="idNum" value="<?php echo $edit ? htmlspecialchars($edit['idNum']) : ''; ?>" <?php echo $edit ? 'readonly' : ''; ?> required>
+  </div>
+  <div class="form-row">
+    <label>First Name</label>
+    <input type="text" name="studFName" value="<?php echo $edit ? htmlspecialchars($edit['studFName']) : ''; ?>" required>
+  </div>
+  <div class="form-row">
+    <label>Last Name</label>
+    <input type="text" name="studLName" value="<?php echo $edit ? htmlspecialchars($edit['studLName']) : ''; ?>">
+  </div>
+  <div class="form-row">
+    <label>Campus</label>
+    <select name="campus">
+      <?php
+      $campuses = ['Main','Banilad','LM','PT'];
+      foreach ($campuses as $c) {
+          $sel = ($edit && $edit['campus']==$c) ? 'selected' : '';
+          echo "<option value=\"$c\" $sel>$c</option>";
+      }
+      ?>
+    </select>
+  </div>
+  <div class="form-row">
+    <label>Amount Paid</label>
+    <input type="text" name="amountPaid" value="<?php echo $edit ? htmlspecialchars($edit['amountPaid']) : '0.00'; ?>">
+  </div>
+  <div class="form-row">
+    <label>Attended</label>
+    <select name="attended">
+      <option value="No" <?php echo (!$edit || $edit['attended']=='No')?'selected':''; ?>>No</option>
+      <option value="Yes" <?php echo ($edit && $edit['attended']=='Yes')?'selected':''; ?>>Yes</option>
+    </select>
+  </div>
+  <div>
+    <button class="button" type="submit"><?php echo $edit ? 'Update' : 'Register'; ?></button>
+    <?php if ($edit): ?><a href="registration.php">Cancel</a><?php endif; ?>
+  </div>
+</form>
+
+<h3>Registered Students</h3>
+<table>
+  <thead><tr><th>ID</th><th>Name</th><th>Campus</th><th>Amount</th><th>Attended</th><th>Actions</th></tr></thead>
+  <tbody>
+    <?php foreach ($all as $r): ?>
+      <tr>
+        <td><?php echo htmlspecialchars($r['idNum']); ?></td>
+        <td><?php echo htmlspecialchars($r['studFName'].' '.$r['studLName']); ?></td>
+        <td><?php echo htmlspecialchars($r['campus']); ?></td>
+        <td><?php echo number_format($r['amountPaid'],2); ?></td>
+        <td><?php echo htmlspecialchars($r['attended']); ?></td>
+        <td>
+          <a href="registration.php?action=edit&id=<?php echo urlencode($r['idNum']); ?>">Edit</a> |
+          <a href="registration.php?action=delete&id=<?php echo urlencode($r['idNum']); ?>" onclick="return confirm('Delete <?php echo htmlspecialchars($r['idNum']); ?>?')">Delete</a>
+        </td>
+      </tr>
+    <?php endforeach; ?>
+  </tbody>
+</table>
+
+<?php require 'footer.php'; ?>
+<?php
+// attendance.php
+require 'config.php';
+require 'header.php';
+
+$msg = '';
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $id = trim($_POST['idNum']);
+    if ($id === '') {
+        $msg = 'Please enter ID.';
+    } else {
+        $stmt = $pdo->prepare("SELECT attended FROM registration WHERE idNum = ?");
+        $stmt->execute([$id]);
+        $row = $stmt->fetch();
+        if (!$row) {
+            $msg = "ID is NOT YET REGISTERED.";
+        } elseif ($row['attended'] === 'Yes') {
+            $msg = "Student's Attendance RECORD ALREADY EXISTS.";
+        } else {
+            $u = $pdo->prepare("UPDATE registration SET attended='Yes' WHERE idNum = ?");
+            $u->execute([$id]);
+            $msg = "Student Attendance is SUCCESSFULLY RECORDED.";
+        }
+    }
+}
+?>
+
+<h2>Attendance</h2>
+
+<?php if ($msg): ?>
+  <div class="<?php echo (strpos($msg,'NOT YET')!==false?'error':'notice'); ?>"><?php echo htmlspecialchars($msg); ?></div>
+<?php endif; ?>
+
+<form method="post">
+  <div class="form-row">
+    <label>Input ID #</label>
+    <input type="text" name="idNum" placeholder="e.g. 2345678">
+  </div>
+  <button class="button" type="submit">Record Attendance</button>
+</form>
+
+<?php require 'footer.php'; ?>
+<?php
+// raffle.php
+require 'config.php';
+require 'header.php';
+
+$campusFilter = $_GET['campus'] ?? 'All';
+$winner = null;
+
+$campuses = ['All','Main','Banilad','LM','PT'];
+if (isset($_GET['draw'])) {
+    if ($campusFilter === 'All') {
+        // select random attendee across all campuses
+        $stmt = $pdo->query("SELECT * FROM registration WHERE attended='Yes' ORDER BY RAND() LIMIT 1");
+    } else {
+        $stmt = $pdo->prepare("SELECT * FROM registration WHERE attended='Yes' AND campus = ? ORDER BY RAND() LIMIT 1");
+        $stmt->execute([$campusFilter]);
+    }
+    $winner = $stmt->fetch();
+}
+?>
+
+<h2>Raffle</h2>
+<form method="get">
+  <label>Set filters here:</label>
+  <select name="campus">
+    <?php foreach ($campuses as $c): $sel = ($c==$campusFilter)?'selected':''; echo "<option $sel>".htmlspecialchars($c)."</option>"; endforeach; ?>
+  </select>
+  <button class="button" type="submit" name="draw" value="1">Reveal the Lucky Winner!</button>
+</form>
+
+<?php if ($winner): ?>
+  <div class="notice">
+    <h3>CONGRATULATIONS!!!</h3>
+    <table>
+      <thead><tr><th>ID #</th><th>Name</th><th>Campus</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><?php echo htmlspecialchars($winner['idNum']); ?></td>
+          <td><?php echo htmlspecialchars($winner['studFName'].' '.$winner['studLName']); ?></td>
+          <td><?php echo htmlspecialchars($winner['campus']); ?></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+<?php elseif (isset($_GET['draw'])): ?>
+  <div class="error">No attendees found for that filter.</div>
+<?php endif; ?>
+
+<?php require 'footer.php'; ?>
+<?php
+// report_by_campus.php
+require 'config.php';
+require 'header.php';
+
+$campus = $_GET['campus'] ?? 'All';
+$campuses = ['All','Main','Banilad','LM','PT'];
+
+$query = "SELECT idNum, studFName, studLName, campus, amountPaid, attended FROM registration";
+$params = [];
+if ($campus !== 'All') {
+    $query .= " WHERE campus = ?";
+    $params[] = $campus;
+}
+$query .= " ORDER BY campus, studLName, studFName";
+$stmt = $pdo->prepare($query);
+$stmt->execute($params);
+$rows = $stmt->fetchAll();
+
+// totals
+$totalRegistrants = count($rows);
+$totalAttendees = 0;
+$totalCollection = 0.0;
+foreach ($rows as $r) {
+    $totalCollection += floatval($r['amountPaid']);
+    if ($r['attended'] === 'Yes') $totalAttendees++;
+}
+?>
+
+<h2>Report (By Campus)</h2>
+<form method="get">
+  <label>Set filters here:</label>
+  <select name="campus">
+    <?php foreach ($campuses as $c) : $sel = ($c==$campus)?'selected':''; ?>
+      <option <?php echo $sel; ?>><?php echo htmlspecialchars($c); ?></option>
+    <?php endforeach; ?>
+  </select>
+  <button class="button" type="submit">Generate Report</button>
+</form>
+
+<h3>Results</h3>
+<table>
+  <thead><tr><th>ID #</th><th>Name</th><th>Campus</th><th>Amount</th><th>Attended</th></tr></thead>
+  <tbody>
+    <?php foreach ($rows as $r): ?>
+      <tr>
+        <td><?php echo htmlspecialchars($r['idNum']); ?></td>
+        <td><?php echo htmlspecialchars($r['studFName'].' '.$r['studLName']); ?></td>
+        <td><?php echo htmlspecialchars($r['campus']); ?></td>
+        <td><?php echo number_format($r['amountPaid'],2); ?></td>
+        <td><?php echo htmlspecialchars($r['attended']); ?></td>
+      </tr>
+    <?php endforeach; ?>
+  </tbody>
+</table>
+
+<p class="small"># of Registrants: <?php echo $totalRegistrants; ?> <br>
+# of Attendees: <?php echo $totalAttendees; ?> <br>
+Total Collection: <?php echo number_format($totalCollection,2); ?> <br>
+Date Generated: <?php echo date('Y-m-d'); ?></p>
+
+<?php require 'footer.php'; ?>
+<?php
+// report_summary.php
+require 'config.php';
+require 'header.php';
+
+// gather summary per campus
+$stmt = $pdo->query("SELECT campus,
+       COUNT(*) AS registered,
+       SUM(attended='Yes') AS attended,
+       COALESCE(SUM(amountPaid),0) AS total_collection
+  FROM registration
+  GROUP BY campus
+  ORDER BY FIELD(campus,'Main','Banilad','LM','PT')");
+
+$rows = $stmt->fetchAll();
+
+$tot_reg = 0; $tot_att = 0; $tot_coll = 0;
+foreach ($rows as $r) {
+    $tot_reg += $r['registered'];
+    $tot_att += $r['attended'];
+    $tot_coll += $r['total_collection'];
+}
+?>
+
+<h2>Summary Report (All Campuses)</h2>
+
+<table>
+  <thead><tr><th>Campus</th><th>Registered</th><th>Attended</th><th>Total Collection</th></tr></thead>
+  <tbody>
+    <?php foreach ($rows as $r): ?>
+      <tr>
+        <td><?php echo htmlspecialchars($r['campus']); ?></td>
+        <td><?php echo $r['registered']; ?></td>
+        <td><?php echo $r['attended']; ?></td>
+        <td><?php echo number_format($r['total_collection'],2); ?></td>
+      </tr>
+    <?php endforeach; ?>
+    <tr style="font-weight:bold">
+      <td>TOTALS</td>
+      <td><?php echo $tot_reg; ?></td>
+      <td><?php echo $tot_att; ?></td>
+      <td><?php echo number_format($tot_coll,2); ?></td>
+    </tr>
+  </tbody>
+</table>
+
+<p class="small">Date Generated: <?php echo date('Y-m-d'); ?></p>
+
+<?php require 'footer.php'; ?>
